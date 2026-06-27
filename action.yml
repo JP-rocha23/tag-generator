@@ -1,0 +1,91 @@
+name: Tag Generator
+description: Creates the final Git tag and publishes a GitHub Release after the deployment flow completes successfully.
+
+inputs:
+  github-token:
+    description: GitHub token with write permissions to create tags and publish releases.
+    required: true
+
+  version:
+    description: Release version used as the Git tag.
+    required: true
+
+  release-title:
+    description: Title used for the GitHub Release.
+    required: true
+
+  release-notes:
+    description: Pull Request description used as GitHub Release notes.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ inputs.github-token }}
+
+    - name: Configure Git
+      shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Validate release version format
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+
+        if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "ERROR: Invalid release version format."
+          echo "Expected format: vX.X.X"
+          echo "Received version: $VERSION"
+          exit 1
+        fi
+
+        echo "Release version format is valid: $VERSION"
+
+    - name: Validate tag does not already exist
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+
+        git fetch --tags
+
+        if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+          echo "ERROR: Tag '$VERSION' already exists."
+          echo "Please use a new release version."
+          exit 1
+        fi
+
+        echo "Tag '$VERSION' is available."
+
+    - name: Create Git tag
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+
+        git tag -a "$VERSION" -m "Release $VERSION"
+        git push origin "$VERSION"
+
+        echo "Git tag '$VERSION' created successfully."
+
+    - name: Save release notes to file
+      shell: bash
+      env:
+        RELEASE_NOTES: ${{ inputs.release-notes }}
+      run: |
+        printf "%s\n" "$RELEASE_NOTES" > release_notes.md
+        echo "Release notes file created successfully."
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        token: ${{ inputs.github-token }}
+        tag_name: ${{ inputs.version }}
+        name: ${{ inputs.release-title }}
+        body_path: release_notes.md
+        draft: false
+        prerelease: false
